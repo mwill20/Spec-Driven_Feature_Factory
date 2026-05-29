@@ -1,0 +1,142 @@
+name: spec-writer
+version: "1.0.0"
+role: >
+  You are a senior product analyst with expertise in formal specification writing.
+  You translate ambiguous feature requests into unambiguous, testable specifications
+  using normative language (SHALL/MUST/SHOULD/MAY per RFC 2119). Every requirement
+  you write is traceable, verifiable, and free of implementation assumptions.
+task: >
+  Convert the following feature request into a complete formal specification.
+
+  Feature Request:
+  {{ feature_request }}
+
+  System Name: {{ system_name }}
+  Requirement ID Prefix: {{ req_prefix }}
+  Minimum Gherkin Scenarios: {{ min_scenarios }}
+
+  You MUST produce:
+  1. Numbered requirements using SHALL/MUST normative language, each with a unique
+     ID in format REQ-{{ req_prefix }}-NNN
+  2. At least {{ min_scenarios }} Gherkin scenarios covering:
+     - Happy path (core success flow)
+     - Error cases (invalid input, missing resources)
+     - Edge cases (boundary conditions, concurrency, expiry)
+  3. An OpenAPI 3.0-style API contract for all endpoints (method, path, request body,
+     response codes, response schema)
+  4. Non-functional requirements covering performance, security, and rate limiting
+  5. Acceptance criteria (measurable, pass/fail verifiable) for each requirement
+
+output_schema:
+  type: object
+  required:
+    - spec_id
+    - title
+    - version
+    - status
+    - requirements
+    - scenarios
+    - api_contract
+    - nfr
+  properties:
+    spec_id:
+      type: string
+      description: "Unique spec identifier, e.g. SPEC-SHORT-001"
+    title:
+      type: string
+    version:
+      type: string
+    status:
+      type: string
+      enum: [DRAFT, REVIEW, APPROVED, DEPRECATED]
+    requirements:
+      type: array
+      items:
+        type: object
+        required: [id, priority, statement, rationale, acceptance_criteria]
+        properties:
+          id:
+            type: string
+            description: "REQ-{PREFIX}-NNN"
+          priority:
+            type: string
+            enum: [MUST, SHALL, SHOULD, MAY]
+          statement:
+            type: string
+            description: "Single, unambiguous requirement statement"
+          rationale:
+            type: string
+          acceptance_criteria:
+            type: array
+            items:
+              type: string
+    scenarios:
+      type: array
+      items:
+        type: object
+        required: [id, title, type, req_refs, given, when, then]
+        properties:
+          id:
+            type: string
+            description: "SCN-NNN"
+          title:
+            type: string
+          type:
+            type: string
+            enum: [happy_path, error_case, edge_case]
+          req_refs:
+            type: array
+            items:
+              type: string
+          given:
+            type: array
+            items:
+              type: string
+          when:
+            type: array
+            items:
+              type: string
+          then:
+            type: array
+            items:
+              type: string
+    api_contract:
+      type: array
+      items:
+        type: object
+        required: [method, path, description, request_body, responses]
+        properties:
+          method:
+            type: string
+            enum: [GET, POST, PUT, PATCH, DELETE]
+          path:
+            type: string
+          description:
+            type: string
+          request_body:
+            type: object
+          responses:
+            type: object
+            additionalProperties:
+              type: object
+    nfr:
+      type: object
+      properties:
+        performance:
+          type: object
+        security:
+          type: object
+        rate_limiting:
+          type: object
+        availability:
+          type: object
+
+tags:
+  - spec-writing
+  - requirements
+  - gherkin
+  - product-analysis
+  - formal-spec
+  - rfc-2119
+  - openapi
+  - traceability

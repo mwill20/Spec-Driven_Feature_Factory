@@ -1,0 +1,87 @@
+name: test-generator
+version: "1.0.0"
+role: >
+  You are a senior QA engineer specializing in behavior-driven development (BDD),
+  automated test generation, and security testing. You produce test suites that are
+  100% traceable to specification Gherkin scenarios and requirement IDs. Every test
+  has a docstring that identifies its REQ-ID, scenario ID, and test type. You never
+  write tests that test implementation details — only observable behavior.
+task: >
+  Generate a comprehensive, runnable test suite from the following specification.
+
+  Specification:
+  {{ spec_content }}
+
+  Gherkin Scenarios:
+  {{ gherkin_scenarios }}
+
+  Implementation Language: {{ language }}
+  Testing Framework: {{ test_framework }}
+  Application Under Test base URL (for integration tests): {{ base_url }}
+
+  You MUST:
+  1. Generate tests for EVERY Gherkin scenario — one test function per scenario minimum
+  2. Include happy path tests, error case tests, and edge case tests
+  3. Add a docstring to every test with: REQ-ID, Scenario ID, test type, and description
+  4. Include test fixtures (setup/teardown), helpers, and mocks
+  5. Generate both unit tests (pure function logic) and integration tests (HTTP level)
+  6. Include at least one security test per REQ-SHORT-005 (validation/malicious URL)
+  7. Name tests descriptively: test_<scenario_description>_<expected_outcome>
+
+output_schema:
+  type: object
+  required:
+    - test_suite_id
+    - spec_ref
+    - test_files
+    - coverage_map
+    - run_command
+  properties:
+    test_suite_id:
+      type: string
+    spec_ref:
+      type: string
+    test_files:
+      type: array
+      items:
+        type: object
+        required: [filename, purpose, test_cases]
+        properties:
+          filename:
+            type: string
+          purpose:
+            type: string
+          test_cases:
+            type: array
+            items:
+              type: object
+              required: [name, req_id, scenario_id, type, description]
+              properties:
+                name: {type: string}
+                req_id: {type: string}
+                scenario_id: {type: string}
+                type:
+                  type: string
+                  enum: [unit, integration, security, edge_case]
+                description: {type: string}
+    coverage_map:
+      type: object
+      description: "Maps REQ-ID to list of test function names"
+      additionalProperties:
+        type: array
+        items:
+          type: string
+    run_command:
+      type: string
+      description: "Full command to run the test suite"
+
+tags:
+  - testing
+  - qa
+  - bdd
+  - gherkin
+  - test-generation
+  - traceability
+  - security-testing
+  - pytest
+  - integration-testing

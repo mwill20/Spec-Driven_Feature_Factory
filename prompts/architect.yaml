@@ -1,0 +1,143 @@
+name: architect
+version: "1.0.0"
+role: >
+  You are a senior software architect with expertise in REST API design, relational
+  data modeling, and cloud-native patterns. You produce implementation plans that are
+  fully traceable to specification requirement IDs. Every design decision you make
+  references a specific requirement; you never add components that no requirement demands.
+task: >
+  Generate a complete technical implementation plan from the following specification.
+
+  Specification Content:
+  {{ spec_content }}
+
+  Target Technology Stack: {{ tech_stack }}
+  Constraints: {{ constraints }}
+  Target Directory: {{ target_directory }}
+
+  You MUST produce:
+  1. A component breakdown: each component has a single responsibility, defined
+     interfaces, and explicit dependencies — no component without a REQ reference
+  2. A data model: all entities, fields, types, constraints, and relationships
+  3. Numbered implementation tasks in dependency order, each referencing specific
+     REQ-IDs and carrying measurable acceptance criteria
+  4. Estimated effort in hours per task
+  5. A directory layout showing where every file lives
+  6. Dependency installation commands (pinned versions)
+
+output_schema:
+  type: object
+  required:
+    - plan_id
+    - spec_ref
+    - stack
+    - directory_layout
+    - components
+    - data_model
+    - tasks
+    - dependencies
+  properties:
+    plan_id:
+      type: string
+    spec_ref:
+      type: string
+    stack:
+      type: object
+      properties:
+        language:
+          type: string
+        framework:
+          type: string
+        database:
+          type: string
+        testing:
+          type: string
+    directory_layout:
+      type: array
+      items:
+        type: object
+        required: [path, purpose]
+        properties:
+          path: {type: string}
+          purpose: {type: string}
+    components:
+      type: array
+      items:
+        type: object
+        required: [name, responsibility, interfaces, dependencies, req_refs]
+        properties:
+          name: {type: string}
+          responsibility: {type: string}
+          interfaces:
+            type: array
+            items: {type: string}
+          dependencies:
+            type: array
+            items: {type: string}
+          req_refs:
+            type: array
+            items: {type: string}
+    data_model:
+      type: object
+      properties:
+        entities:
+          type: array
+          items:
+            type: object
+            required: [name, fields, req_refs]
+            properties:
+              name: {type: string}
+              fields:
+                type: array
+                items:
+                  type: object
+                  required: [name, type, constraints]
+                  properties:
+                    name: {type: string}
+                    type: {type: string}
+                    constraints:
+                      type: array
+                      items: {type: string}
+              req_refs:
+                type: array
+                items: {type: string}
+    tasks:
+      type: array
+      items:
+        type: object
+        required: [id, title, req_refs, files, acceptance_criteria, estimated_hours]
+        properties:
+          id: {type: string}
+          title: {type: string}
+          req_refs:
+            type: array
+            items: {type: string}
+          files:
+            type: array
+            items: {type: string}
+          acceptance_criteria:
+            type: array
+            items: {type: string}
+          estimated_hours: {type: number}
+    dependencies:
+      type: object
+      properties:
+        install_command: {type: string}
+        packages:
+          type: array
+          items:
+            type: object
+            required: [name, version, purpose]
+            properties:
+              name: {type: string}
+              version: {type: string}
+              purpose: {type: string}
+
+tags:
+  - architecture
+  - planning
+  - data-modeling
+  - api-design
+  - traceability
+  - component-design
+  - dependency-management

@@ -1,0 +1,460 @@
+spec_id: SPEC-SHORT-001
+title: URL Shortener Service
+version: "1.0.0"
+status: APPROVED
+created: "2026-05-29"
+authors:
+  - role: product-analyst
+    prompt: prompts/spec-writer.yaml
+description: >
+  A RESTful URL shortening service that accepts long URLs, generates unique short
+  codes, tracks click analytics, supports optional expiration, and rejects invalid
+  or malicious URLs. All requirement IDs follow the pattern REQ-SHORT-NNN.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 1 — FUNCTIONAL REQUIREMENTS
+# ─────────────────────────────────────────────────────────────────────────────
+requirements:
+
+  - id: REQ-SHORT-001
+    priority: MUST
+    statement: >
+      The system MUST accept a valid HTTP or HTTPS URL and return a unique
+      alphanumeric short code of exactly 6 characters.
+    rationale: Core value proposition of the service.
+    acceptance_criteria:
+      - "POST /urls with a valid URL body returns HTTP 201 with a `short_code` field"
+      - "The returned short_code is exactly 6 characters [a-zA-Z0-9]"
+      - "Two distinct valid URLs produce two distinct short codes"
+      - "The same URL submitted twice returns the same short code (idempotent)"
+
+  - id: REQ-SHORT-002
+    priority: MUST
+    statement: >
+      The system MUST redirect HTTP GET requests to /{code} to the original URL
+      with HTTP 302 Found when the short code exists and has not expired.
+    rationale: Fundamental redirect functionality.
+    acceptance_criteria:
+      - "GET /{valid_code} returns HTTP 302 with Location header set to original URL"
+      - "GET /{expired_code} returns HTTP 410 Gone"
+      - "GET /{nonexistent_code} returns HTTP 404 Not Found"
+
+  - id: REQ-SHORT-003
+    priority: SHALL
+    statement: >
+      The system SHALL track and persist the following analytics per short URL:
+      click count (total redirects), last accessed timestamp (UTC), and referrer
+      (HTTP Referer header value, nullable).
+    rationale: Analytics are a core product feature per PM requirements.
+    acceptance_criteria:
+      - "Each successful redirect increments click_count by exactly 1"
+      - "last_accessed is updated to the current UTC timestamp on every redirect"
+      - "referrer is stored as-is from the HTTP Referer header; null if absent"
+      - "GET /api/urls/{code} returns all three analytics fields"
+
+  - id: REQ-SHORT-004
+    priority: SHALL
+    statement: >
+      The system SHALL support an optional expiration date on URL creation.
+      When a short URL's expiration date is in the past, all redirect requests
+      to that URL SHALL return HTTP 410 Gone.
+    rationale: Time-limited campaigns and compliance use cases.
+    acceptance_criteria:
+      - "POST /urls with expires_at in the future creates a URL that redirects normally"
+      - "POST /urls with expires_at in the past creates a URL that immediately returns 410"
+      - "POST /urls without expires_at creates a URL that never expires"
+      - "Expiry is evaluated at request time, not at creation time"
+
+  - id: REQ-SHORT-005
+    priority: MUST
+    statement: >
+      The system MUST validate all submitted URLs and MUST reject:
+      (a) URLs with invalid format (not parseable as HTTP/HTTPS),
+      (b) duplicate submissions returning the existing code rather than a new one,
+      (c) URLs matching a configurable blocklist of known malicious domains.
+    rationale: Security and data integrity; OWASP SSRF prevention.
+    acceptance_criteria:
+      - "POST /urls with a non-URL string returns HTTP 422 with error detail"
+      - "POST /urls with ftp:// or file:// scheme returns HTTP 422"
+      - "POST /urls with a domain on the blocklist returns HTTP 400 with reason BLOCKED"
+      - "POST /urls with a previously submitted URL returns HTTP 200 with existing code"
+
+  - id: REQ-SHORT-006
+    priority: MUST
+    statement: >
+      The system MUST expose a RESTful JSON API with appropriate HTTP status codes,
+      structured error responses, and an OpenAPI 3.0 specification auto-generated
+      at /docs.
+    rationale: API contract clarity for integration consumers.
+    acceptance_criteria:
+      - "All error responses include: status_code, error, detail fields"
+      - "GET /docs returns an interactive OpenAPI UI"
+      - "GET /api/health returns HTTP 200 with service status"
+      - "All responses use Content-Type: application/json except 302 redirects"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 2 — NON-FUNCTIONAL REQUIREMENTS
+# ─────────────────────────────────────────────────────────────────────────────
+nfr:
+  performance:
+    redirect_p99_ms: 100
+    shorten_p99_ms: 300
+    throughput_rps: 500
+    note: >
+      Redirect path (GET /{code}) MUST complete within 100ms at p99 under
+      500 concurrent requests. Shortening (POST /urls) MUST complete within 300ms.
+
+  security:
+    tls: "All production traffic MUST use TLS 1.2 or higher"
+    ssrf: >
+      URL validation MUST reject private IP ranges (10.x, 172.16-31.x, 192.168.x,
+      127.x, ::1) to prevent SSRF attacks — REQ-SHORT-005 extended control
+    input_size: "URL input MUST be rejected if longer than 2048 characters"
+    headers: >
+      All responses MUST include: X-Content-Type-Options: nosniff,
+      X-Frame-Options: DENY, Referrer-Policy: no-referrer
+    secrets: "Database credentials and app secrets MUST be loaded from environment variables"
+    audit_log: >
+      All URL creation, deletion, and failed validation events MUST be logged
+      with timestamp, client IP, and request payload (URL truncated to 100 chars)
+
+  rate_limiting:
+    create_endpoint:
+      requests: 10
+      window_seconds: 60
+      per: ip_address
+      response: "HTTP 429 Too Many Requests with Retry-After header"
+    redirect_endpoint:
+      requests: 100
+      window_seconds: 60
+      per: ip_address
+      response: "HTTP 429 Too Many Requests"
+
+  availability:
+    uptime_target: "99.9% monthly"
+    graceful_shutdown: >
+      The service SHOULD handle SIGTERM by completing in-flight requests
+      before shutting down (30-second grace period)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 3 — GHERKIN SCENARIOS
+# ─────────────────────────────────────────────────────────────────────────────
+scenarios:
+
+  - id: SCN-001
+    title: Successfully shorten a valid URL
+    type: happy_path
+    req_refs: [REQ-SHORT-001, REQ-SHORT-006]
+    given:
+      - "the URL shortener service is running"
+      - "the URL 'https://www.example.com/very/long/path?q=search' has not been submitted before"
+    when:
+      - "a client sends POST /urls with body {\"url\": \"https://www.example.com/very/long/path?q=search\"}"
+    then:
+      - "the response status is 201 Created"
+      - "the response body contains a 'short_code' field of exactly 6 alphanumeric characters"
+      - "the response body contains a 'short_url' field combining the base URL and the short_code"
+      - "the response body contains the original 'url' field"
+
+  - id: SCN-002
+    title: Redirect a valid short URL to original
+    type: happy_path
+    req_refs: [REQ-SHORT-002]
+    given:
+      - "a short code 'abc123' exists in the system mapping to 'https://www.example.com'"
+      - "the URL has not expired"
+    when:
+      - "a client sends GET /abc123"
+    then:
+      - "the response status is 302 Found"
+      - "the Location header is 'https://www.example.com'"
+
+  - id: SCN-003
+    title: Analytics increment on each redirect
+    type: happy_path
+    req_refs: [REQ-SHORT-003]
+    given:
+      - "a short code 'abc123' exists with click_count of 0"
+    when:
+      - "a client sends GET /abc123 three times"
+    then:
+      - "GET /api/urls/abc123 returns click_count of 3"
+      - "last_accessed reflects the timestamp of the third request"
+
+  - id: SCN-004
+    title: Expired URL returns 410 Gone
+    type: error_case
+    req_refs: [REQ-SHORT-004, REQ-SHORT-002]
+    given:
+      - "a short code 'exp999' exists with expires_at set to '2020-01-01T00:00:00Z'"
+    when:
+      - "a client sends GET /exp999"
+    then:
+      - "the response status is 410 Gone"
+      - "the response body contains error detail 'URL has expired'"
+
+  - id: SCN-005
+    title: Reject invalid URL format
+    type: error_case
+    req_refs: [REQ-SHORT-005, REQ-SHORT-006]
+    given:
+      - "the URL shortener service is running"
+    when:
+      - "a client sends POST /urls with body {\"url\": \"not-a-url\"}"
+    then:
+      - "the response status is 422 Unprocessable Entity"
+      - "the response body contains error detail about invalid URL format"
+
+  - id: SCN-006
+    title: Reject non-HTTP scheme (ftp://)
+    type: error_case
+    req_refs: [REQ-SHORT-005]
+    given:
+      - "the URL shortener service is running"
+    when:
+      - "a client sends POST /urls with body {\"url\": \"ftp://files.example.com/data\"}"
+    then:
+      - "the response status is 422 Unprocessable Entity"
+      - "the response body contains error detail about unsupported URL scheme"
+
+  - id: SCN-007
+    title: Reject URL on malicious domain blocklist
+    type: error_case
+    req_refs: [REQ-SHORT-005]
+    given:
+      - "the domain 'malware.example.com' is on the configured blocklist"
+    when:
+      - "a client sends POST /urls with body {\"url\": \"https://malware.example.com/payload\"}"
+    then:
+      - "the response status is 400 Bad Request"
+      - "the response body contains error field 'BLOCKED' and the blocked domain"
+
+  - id: SCN-008
+    title: Idempotent submission returns existing code
+    type: edge_case
+    req_refs: [REQ-SHORT-001, REQ-SHORT-005]
+    given:
+      - "the URL 'https://www.example.com' was previously shortened to code 'abc123'"
+    when:
+      - "a client sends POST /urls with the same URL 'https://www.example.com'"
+    then:
+      - "the response status is 200 OK"
+      - "the response body contains short_code 'abc123' (the existing code)"
+
+  - id: SCN-009
+    title: 404 for nonexistent short code
+    type: error_case
+    req_refs: [REQ-SHORT-002, REQ-SHORT-006]
+    given:
+      - "the short code 'zzz999' does not exist in the system"
+    when:
+      - "a client sends GET /zzz999"
+    then:
+      - "the response status is 404 Not Found"
+      - "the response body contains error detail 'Short code not found'"
+
+  - id: SCN-010
+    title: Reject URL with private IP (SSRF prevention)
+    type: error_case
+    req_refs: [REQ-SHORT-005]
+    given:
+      - "the URL shortener service is running"
+    when:
+      - "a client sends POST /urls with body {\"url\": \"http://192.168.1.1/admin\"}"
+    then:
+      - "the response status is 422 Unprocessable Entity"
+      - "the response body contains error detail about private/reserved IP addresses"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 4 — API CONTRACT (OpenAPI 3.0 style)
+# ─────────────────────────────────────────────────────────────────────────────
+api_contract:
+
+  - method: POST
+    path: /urls
+    description: "Shorten a long URL. Idempotent: returns existing code if URL already exists."
+    req_refs: [REQ-SHORT-001, REQ-SHORT-004, REQ-SHORT-005]
+    request_body:
+      content_type: application/json
+      schema:
+        type: object
+        required: [url]
+        properties:
+          url:
+            type: string
+            format: uri
+            maxLength: 2048
+            description: "Valid HTTP or HTTPS URL to shorten"
+          expires_at:
+            type: string
+            format: date-time
+            nullable: true
+            description: "Optional ISO 8601 UTC expiration datetime"
+          custom_code:
+            type: string
+            pattern: "^[a-zA-Z0-9]{6}$"
+            nullable: true
+            description: "Optional custom 6-char code (if available)"
+    responses:
+      "201":
+        description: URL shortened successfully (new entry)
+        schema:
+          type: object
+          properties:
+            short_code: {type: string}
+            short_url: {type: string}
+            url: {type: string}
+            expires_at: {type: string, nullable: true}
+            created_at: {type: string}
+      "200":
+        description: URL already exists; returning existing short code
+        schema:
+          type: object
+          properties:
+            short_code: {type: string}
+            short_url: {type: string}
+            url: {type: string}
+            already_exists: {type: boolean}
+      "400":
+        description: Blocked domain
+        schema:
+          $ref: "#/components/error_response"
+      "422":
+        description: Invalid URL format or unsupported scheme
+        schema:
+          $ref: "#/components/error_response"
+      "429":
+        description: Rate limit exceeded
+        headers:
+          Retry-After: {type: integer}
+
+  - method: GET
+    path: "/{code}"
+    description: "Redirect to the original URL. Increments click analytics."
+    req_refs: [REQ-SHORT-002, REQ-SHORT-003, REQ-SHORT-004]
+    parameters:
+      - name: code
+        in: path
+        required: true
+        schema: {type: string, pattern: "^[a-zA-Z0-9]{6}$"}
+    responses:
+      "302":
+        description: Redirect to original URL
+        headers:
+          Location: {type: string, format: uri}
+      "404":
+        description: Short code not found
+        schema:
+          $ref: "#/components/error_response"
+      "410":
+        description: URL has expired
+        schema:
+          $ref: "#/components/error_response"
+
+  - method: GET
+    path: /api/urls/{code}
+    description: "Retrieve URL metadata and analytics without redirecting."
+    req_refs: [REQ-SHORT-003, REQ-SHORT-006]
+    parameters:
+      - name: code
+        in: path
+        required: true
+        schema: {type: string}
+    responses:
+      "200":
+        description: URL info and analytics
+        schema:
+          type: object
+          properties:
+            short_code: {type: string}
+            url: {type: string}
+            click_count: {type: integer}
+            last_accessed: {type: string, nullable: true}
+            referrer: {type: string, nullable: true}
+            created_at: {type: string}
+            expires_at: {type: string, nullable: true}
+            is_active: {type: boolean}
+      "404":
+        description: Short code not found
+
+  - method: DELETE
+    path: /api/urls/{code}
+    description: "Delete a short URL entry."
+    req_refs: [REQ-SHORT-006]
+    parameters:
+      - name: code
+        in: path
+        required: true
+        schema: {type: string}
+    responses:
+      "204":
+        description: Deleted successfully
+      "404":
+        description: Short code not found
+
+  - method: GET
+    path: /api/health
+    description: "Service health check endpoint."
+    req_refs: [REQ-SHORT-006]
+    responses:
+      "200":
+        description: Service is healthy
+        schema:
+          type: object
+          properties:
+            status: {type: string, enum: [healthy, degraded]}
+            version: {type: string}
+            timestamp: {type: string}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 5 — SCHEMA COMPONENTS
+# ─────────────────────────────────────────────────────────────────────────────
+components:
+  error_response:
+    type: object
+    required: [status_code, error, detail]
+    properties:
+      status_code: {type: integer}
+      error: {type: string}
+      detail: {type: string}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 6 — DATA MODEL
+# ─────────────────────────────────────────────────────────────────────────────
+data_model:
+  entities:
+    - name: ShortenedUrl
+      table: shortened_urls
+      req_refs: [REQ-SHORT-001, REQ-SHORT-002, REQ-SHORT-003, REQ-SHORT-004]
+      fields:
+        - name: id
+          type: INTEGER
+          constraints: [PRIMARY KEY, AUTOINCREMENT]
+        - name: short_code
+          type: VARCHAR(6)
+          constraints: [UNIQUE, NOT NULL, INDEX]
+        - name: original_url
+          type: TEXT
+          constraints: [NOT NULL]
+        - name: url_hash
+          type: VARCHAR(64)
+          constraints: [UNIQUE, NOT NULL, INDEX]
+          note: "SHA-256 hash of original_url for fast duplicate detection"
+        - name: click_count
+          type: INTEGER
+          constraints: [NOT NULL, DEFAULT 0]
+        - name: last_accessed
+          type: DATETIME
+          constraints: [NULLABLE]
+        - name: referrer
+          type: TEXT
+          constraints: [NULLABLE]
+        - name: expires_at
+          type: DATETIME
+          constraints: [NULLABLE]
+        - name: created_at
+          type: DATETIME
+          constraints: [NOT NULL, DEFAULT CURRENT_TIMESTAMP]
+        - name: is_active
+          type: BOOLEAN
+          constraints: [NOT NULL, DEFAULT TRUE]
